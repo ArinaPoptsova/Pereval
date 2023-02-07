@@ -9,8 +9,8 @@ from schemas import DataSchema
 
 class Pereval:
     def __init__(self):
-        self.engine = create_engine(f'postgresql+psycopg2://{os.getenv("FSTR_DB_LOGIN")}:'
-                                    f'{os.getenv("FSTR_DB_PASS")}@{os.getenv("FSTR_DB_HOST")}/Pereval?client_encoding=utf8')\
+        self.engine = create_engine(f'postgresql+psycopg2://{os.getenv("FSTR_DB_LOGIN")}:{os.getenv("FSTR_DB_PASS")}'
+                                    f'@{os.getenv("FSTR_DB_HOST")}/Pereval')\
             .execution_options(autocommit=True)
         self.meta = MetaData(self.engine)
         self.conn = self.engine.connect()
@@ -30,10 +30,12 @@ class Pereval:
         img_3 = aliased(self.images)
         return select(self.pereval_added.c.date_added, self.pereval_added.c.status, self.pereval_added.c.beautyTitle,
                                self.pereval_added.c.title.label('pereval_title'), self.pereval_added.c.other_titles,
-                               self.pereval_added.c.connect, self.pereval_added.c.add_time, self.users.c.fam,
-                               self.users.c.name, self.users.c.otc, self.users.c.email, self.users.c.phone,
+                               self.pereval_added.c.connect, self.pereval_added.c.add_time,
+                      self.pereval_images.c.id.label('image_id'),
+                               self.users.c.fam, self.users.c.name, self.users.c.otc, self.users.c.email, self.users.c.phone,
                                self.coords.c.latitude, self.coords.c.longitude, self.coords.c.height,
-                               self.levels.c.winter, self.levels.c.summer, self.levels.c.spring, self.levels.c.autumn,
+                               self.levels.c.winter, self.levels.c.summer,
+                                self.levels.c.autumn, self.levels.c.spring,
                                img_1.c.title.label('img_1_title'), img_1.c.img.label('img_1'),
                                img_2.c.title.label('img_2_title'), img_2.c.img.label('img_2'),
                                img_3.c.title.label('img_3_title'), img_3.c.img.label('img_3'))\
@@ -66,6 +68,17 @@ class Pereval:
     def get_user_id(self, email):
         get_id_query = select(self.users.c.id).where(self.users.c.email == email)
         return self.conn.execute(get_id_query).fetchone()[0]
+
+    def is_user_exist(self, email):
+        get_user_query = select(self.users).where(self.users.c.email == email)
+        user = self.conn.execute(get_user_query).fetchone()
+        if user:
+            return True
+        else:
+            return False
+    def get_image(self, title):
+        get_image_query = select(self.images).where(self.images.c.title == title)
+        return self.conn.execute(get_image_query).fetchone()
 
     def get_coords_id(self, latitude, longitude, height):
         get_id_query = select(self.coords.c.id).where(and_(self.coords.c.latitude == latitude,
@@ -171,17 +184,17 @@ class Pereval:
         self.conn.execute(up_level_query)
         self.conn.commit()
 
-    def change_images(self, images_id, img_1_title, img_1_img, img_2_title=None, img_2_img=None,
-                         img_3_title=None, img_3_img=None):
-        img_id_1 = self.conn.execute(select(self.pereval_images.c.img_id_1)
-                                     .where(self.pereval_images.c.id == images_id)).fetchone()[0]
-        img_id_2 = self.conn.execute(
-            select(self.pereval_images.c.img_id_2).where(self.pereval_images.c.id == images_id)).fetchone()[0]
-        img_id_3 = self.conn.execute(
-            select(self.pereval_images.c.img_id_3).where(self.pereval_images.c.id == images_id)).fetchone()[0]
-        img_data = [{'id': img_id_1, 'title': img_1_title, 'img': img_1_img},
-                    {'id': img_id_2, 'title': img_2_title, 'img': img_2_img},
-                    {'id': img_id_3, 'title': img_3_title, 'img': img_3_img}]
+    def change_images(self, images_id, img_1_id, img_1_title, img_1_img, img_2_id=None, img_2_title=None, img_2_img=None,
+                         img_3_id=None, img_3_title=None, img_3_img=None):
+        # img_id_1 = self.conn.execute(select(self.pereval_images.c.img_id_1)
+        #                              .where(self.pereval_images.c.id == images_id)).fetchone()[0]
+        # img_id_2 = self.conn.execute(
+        #     select(self.pereval_images.c.img_id_2).where(self.pereval_images.c.id == images_id)).fetchone()[0]
+        # img_id_3 = self.conn.execute(
+        #     select(self.pereval_images.c.img_id_3).where(self.pereval_images.c.id == images_id)).fetchone()[0]
+        img_data = [{'id': img_1_id, 'title': img_1_title, 'img': img_1_img},
+                    {'id': img_2_id, 'title': img_2_title, 'img': img_2_img},
+                    {'id': img_3_id, 'title': img_3_title, 'img': img_3_img}]
         for i in range(3):
             if img_data[i]['id']:
                 self.change_image(img_data[i]['id'], img_data[i]['title'], img_data[i]['img'])
@@ -200,3 +213,39 @@ class Pereval:
         )
         self.conn.execute(up_image_query)
         self.conn.commit()
+
+    # def delete_coords(self, coords_id):
+    #     del_coords_query = self.coords.delete().where(self.coords.c.id == coords_id)
+    #     self.conn.execute(del_coords_query)
+    #     self.conn.commit()
+    #
+    # def delete_level(self, level_id):
+    #     del_level_query = self.levels.delete().where(self.levels.c.id == level_id)
+    #     self.conn.execute(del_level_query)
+    #     self.conn.commit()
+    #
+    # def delete_image(self, img_id):
+    #     del_img_query = self.images.delete().where(self.images.c.id == img_id)
+    #     self.conn.execute(del_img_query)
+    #     self.conn.commit()
+    #
+    # def delete_pereval_images(self, images_id):
+    #     img_id_1 = self.conn.execute(select(self.pereval_images.c.img_id_1)
+    #                                  .where(self.pereval_images.c.id == images_id)).fetchone()[0]
+    #     img_id_2 = self.conn.execute(
+    #         select(self.pereval_images.c.img_id_2).where(self.pereval_images.c.id == images_id)).fetchone()[0]
+    #     img_id_3 = self.conn.execute(
+    #         select(self.pereval_images.c.img_id_3).where(self.pereval_images.c.id == images_id)).fetchone()[0]
+    #     img_id_list = [img_id_1, img_id_2, img_id_3]
+    #     for id in img_id_list:
+    #         self.delete_image(id)
+    #     del_pereval_images_query = self.pereval_images.delete().where(self.pereval_images.c.id == images_id)
+    #     self.conn.execute(del_pereval_images_query)
+    #     self.conn.commit()
+
+
+pereval = Pereval()
+# pereval.add_image('0img', bytes(10))
+# print(pereval.get_image('0img').title)
+# print(pereval.get_user_id('arina.poptsova@yamdex.ru'))
+print(pereval.get_pereval_by_id(41))

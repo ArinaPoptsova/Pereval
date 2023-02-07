@@ -1,42 +1,59 @@
 import datetime
 import json
 
-from flask import Flask
-from .dataclass import Pereval
-from sqlalchemy.exc import OperationalError
+from flask import Flask, request, jsonify
+# from psycopg2 import IntegrityError
+# from psycopg2 import DataError
+from werkzeug.exceptions import BadRequest
 
+from dataclass import Pereval
+from sqlalchemy.exc import OperationalError, DataError, IntegrityError, InternalError
 
 app = Flask(__name__)
 
+def add_and_get_image(pereval, data, i):
+    try:
+        pereval.add_image(data['images'][i]['title'], (data['images'][i]['data']).encode('utf-8'))
+    except:
+        img = None
+    else:
+        img = pereval.get_image(data['images'][i]['title'])
+    return img
 
-@app.route('/pereval/create/', methods=['POST'])
-def submitData(json_data):
+def get_image(data, i):
+    try:
+        img = {'title': data['images'][i]['title'], 'img': data['images'][i]['data']}
+    except:
+        img = None
+    return img
+
+@app.route('/submitData/create/', methods=['POST'])
+def submitData():
     try:
         pereval = Pereval()
-        data = json.loads(json_data)
-        pereval.add_user(data['user']['email'], data['user']['fam'], data['user']['name'], data['user']['phone'],
-                        data['user']['otc'])
+        data = request.get_json()
+        if not pereval.is_user_exist(data['user']['email']):
+            pereval.add_user(data['user']['email'], data['user']['fam'], data['user']['name'], data['user']['phone'],
+                            data['user']['otc'])
         pereval.add_coords(data['coords']['latitude'], data['coords']['longitude'], data['coords']['height'])
 
-        img_id_1 = pereval.get_img_id(data['images'][0]['title'])
-        try:
-            img_id_2 = pereval.get_img_id(data['images'][1]['title'])
-        except:
-            pass
+        if data['images']:
+            img_1 = add_and_get_image(pereval, data, 0)
+            img_2 = add_and_get_image(pereval, data, 1)
+            img_3 = add_and_get_image(pereval, data, 2)
 
-        try:
-            img_id_3 = pereval.get_img_id(data['images'][2]['title'])
-        except:
-            pass
-
-        pereval.add_pereval_images(img_id_1, img_id_2 if img_id_2 else None, img_id_3 if img_id_3 else None)
+            pereval.add_pereval_images(img_1.id if img_1 else None,
+                                    img_2.id if img_2 else None,
+                                    img_3.id if img_3 else None)
+            images_id = pereval.get_images_id(img_1.id if img_1 else None)
+        else:
+            images_id = None
         pereval.add_level(data['level']['winter'], data['level']['summer'],
-                          data['level']['autumn'], data['level']['spring'])
+                            data['level']['autumn'], data['level']['spring'])
 
         user_id = pereval.get_user_id(data['user']['email'])
         coords_id = pereval.get_coords_id(data['coords']['latitude'], data['coords']['longitude'],
-                                          data['coords']['height'])
-        images_id = pereval.get_images_id(img_id_1)
+                                            data['coords']['height'])
         level_id = pereval.get_level_id(data['level']['winter'], data['level']['summer'],
                                         data['level']['autumn'], data['level']['spring'])
 
@@ -46,72 +63,132 @@ def submitData(json_data):
                             level_id=level_id)
     except OperationalError:
         response = {'status': 500, 'message': 'Ошибка подключения к БД', 'id': None}
-    except TypeError:
+    except IntegrityError:
         response = {'status': 400, 'message': 'Пропущены обязательные поля', 'id': None}
+    except InternalError:
+        response = {'status': 400, 'message': 'Данное поле должно быть уникальным', 'id': None}
+    except TypeError:
+        response = {'status': 400, 'message': 'Неверно введённые данные', 'id': None}
+    except DataError:
+        response = {'status': 400, 'message': 'Неверно введённые данные', 'id': None}
     else:
         pereval_id = pereval.get_pereval_id(images_id)
         response = {'status': 200, 'message': None, 'id': pereval_id}
     finally:
-        return json.dumps(response)
+        return json.dumps(response, ensure_ascii=False)
 
 
 @app.route('/submitData/<int:id>/', methods=['GET'])
-def get_pereval(id):
+def getPereval(id):
     pereval = Pereval()
     data = json.dumps(pereval.get_pereval_by_id(id))
     return data
 
 
 @app.route('/submitData/<int:id>/', methods=['PATCH'])
-def changeData(id, json_data):
+def changeData(id):
     pereval = Pereval()
     if pereval.is_status_new(id):
         try:
-            data = json.loads(json_data)
-            coords_id = pereval.get_coords_id(data['coords']['latitude'],
-                                              data['coords']['longitude'], data['coords']['height'])
+            pereval_data = pereval.get_pereval_by_id(id)
+            coords_id = pereval.get_coords_id(pereval_data['latitude'], pereval_data['longitude'], pereval_data['height'])
+            if pereval_data['img_1_title']:
+                img_1_id = pereval.get_image(pereval_data['img_1_title']).id
+                images_id = pereval.get_images_id(img_1_id)
+            else:
+                img_1_id = None
+                images_id = None
+
+            if pereval_data['img_2_title']:
+                img_2_id = pereval.get_image(pereval_data['img_2_title']).id
+            else:
+                img_2_id = None
+            if pereval_data['img_3_title']:
+                img_3_id = pereval.get_image(pereval_data['img_3_title']).id
+            else:
+                img_3_id = None
+
+
+            if pereval_data['winter'] or pereval_data['summer'] or \
+                    pereval_data['autumn'] or pereval_data['spring']:
+                level_id = pereval.get_level_id(pereval_data['winter'], pereval_data['summer'],
+                                            pereval_data['autumn'], pereval_data['spring'])
+            else:
+                level_id = None
+
+
+            data = request.get_json()
             pereval.change_coords(coords_id, data['coords']['latitude'],
                                               data['coords']['longitude'], data['coords']['height'])
-            level_id = pereval.get_level_id(data['level']['winter'], data['level']['summer'],
-                              data['level']['autumn'], data['level']['spring'])
-            pereval.change_level(level_id, data['level']['winter'], data['level']['summer'],
-                              data['level']['autumn'], data['level']['spring'])
-            if data['images']:
-                img_id_1 = pereval.get_img_id(data['images'][0]['title'])
-                try:
-                    img_id_2 = pereval.get_img_id(data['images'][1]['title'])
-                except:
-                    pass
+            if data['level']:
+                if level_id:
+                    pereval.change_level(level_id, data['level']['winter'], data['level']['summer'],
+                                    data['level']['autumn'], data['level']['spring'])
+                else:
+                    pereval.add_level(data['level']['winter'], data['level']['summer'],
+                                data['level']['autumn'], data['level']['spring'])
+                    level_id = pereval.get_level_id(data['level']['winter'], data['level']['summer'],
+                                                    data['level']['autumn'], data['level']['spring'])
+            else:
+                level_id = None
 
-                try:
-                    img_id_3 = pereval.get_img_id(data['images'][2]['title'])
-                except:
-                    pass
-                images_id = pereval.get_images_id(img_id_1)
-                pereval.change_images(images_id, data['images'][0]['title'], data['images'][0]['data'],
-                                      data['images'][1]['title'] if img_id_2 else None,
-                                      data['images'][1]['data'] if img_id_2 else None,
-                                      data['images'][2]['title'] if img_id_3 else None,
-                                      data['images'][2]['data'] if img_id_3 else None)
+            if data['images']:
+                if images_id:
+                    # img_1 = get_image(data, 0)
+                    img_2 = get_image(data, 1)
+                    img_3 = get_image(data, 2)
+                    pereval.change_images(images_id, img_1_id, data['images'][0]['title'],
+                                    data['images'][0]['data'].encode('utf-8'),
+                                    img_2_id if img_2 else None,
+                                    img_2['title'] if img_2 else None,
+                                    img_2['img'].encode('utf-8') if img_2 else None,
+                                    img_3_id if img_3 else None,
+                                    img_3['title'] if img_3 else None,
+                                    img_3['img'].encode('utf-8') if img_3 else None)
+                else:
+                    img_1 = add_and_get_image(pereval, data, 0)
+                    img_2 = add_and_get_image(pereval, data, 1)
+                    img_3 = add_and_get_image(pereval, data, 2)
+
+                    pereval.add_pereval_images(img_1.id,
+                                               img_2.id if img_2 else None,
+                                               img_3.id if img_3 else None)
+                    images_id = pereval.get_images_id(img_1.id)
+            else:
+                images_id = None
 
             pereval.change_pereval(id=id, date_added=pereval.get_date_added(id), beautyTitle=data['beauty_title'],
                                    title=data['title'], other_titles=data['other_titles'], connect=data['connect'],
                                    coords_id=coords_id, level_id=level_id, images_id=images_id)
         except TypeError:
             response = {'state': 0, 'message': 'Неверно введённые данные'}
+        except DataError:
+            response = {'state': 0, 'message': 'Неверно введённые данные'}
+        except IntegrityError:
+            response = {'state': 0, 'message': 'Пропущены обязательные поля'}
+        except KeyError:
+            response = {'state': 0, 'message': 'Объект не существвует'}
+        except InternalError:
+            response = {'state': 0, 'message': 'Данное поле должно быть уникальным'}
         except OperationalError:
             response = {'state': 0, 'message': 'Ошибка подключения к БД'}
         else:
             response = {'state': 1, 'message': ''}
-        return json.dumps(response)
+        return json.dumps(response, ensure_ascii=False)
 
-@app.route('/submitData/?user_email=<str:user_email>', methods=['GET'])
-def get_users_perevals(user_email):
+@app.route('/submitData/', methods=['GET'])
+def getUsersPereval():
+    user_email = request.args.get('user_email')
     pereval = Pereval()
     data = json.dumps(pereval.get_users_perevals(user_email))
     return data
 
 
-# if __name__ == '__main__':
-#     app.debug = True
-#     app.run(port=4996)
+# "{\"beauty_title\": \"New_Beauty_Pereval\", \"title\": \"Pereval\", \"other_titles\": \"New_Pereval\", \"connect\": \"\", \"add_time\": \"2022-12-15 15:35:20\", \"user\": {\"email\": \"arina.poptsova@yandex.ru\", \"fam\": \"Poptsova\", \"name\": \"Arina\", \"otc\": \"Aleksandrovna\", \"phone\": \"89555555555\"}, \"coords\":{ \"latitude\": \"63.1532\", \"longitude\": \"10.4728\", \"height\": \"2100\"}, \"level\":{\"winter\": \"\", \"summer\": \"1А\", \"autumn\": \"1А\", \"spring\": \"\"}, \"images\": [{\"data\": \b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\', \"spring\": \"0img\"}]}"
+
+# r"{"beauty_title": "New_Beauty_Pereval", "title": "Pereval", "other_titles": "New_Pereval", "connect": "", "add_time": "2022-12-15 15:35:20", "user": {"email": "arina.poptsova@yandex.ru", "fam": "Poptsova", "name": "Arina", "otc": "Aleksandrovna", "phone": "89555555555"}, "coords":{"latitude": "63.1532", "longitude": "10.4728", "height": "2100"}, "level":{"winter": "", "summer": "1А", "autumn": "1А", "spring": ""}, "images": [{"data": b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00", "spring": "0img"}]}"
+
+# "{\"beauty_title\": \"New_Beauty_Pereval\", \"title\": \"Pereval\", \"other_titles\": \"New_Pereval\", \"connect\": \"\", \"add_time\": \"2022-12-15 15:35:20\", \"user\": {\"email\": \"arina.poptsova@yandex.ru\", \"fam\": \"Poptsova\", \"name\": \"Arina\", \"otc\": \"Aleksandrovna\", \"phone\": \"89555555555\"}, \"coords\":{ \"latitude\": \"63.1532\", \"longitude\": \"10.4728\", \"height\": \"2100\"}, \"level\":{\"winter\": \"\", \"summer\": \"1А\", \"autumn\": \"1А\", \"spring\": \"\"}, \"images\": [{\"data\": "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00", \"spring\": \"0img\"}]}"
+
+if __name__ == '__main__':
+    app.run(debug=True)
