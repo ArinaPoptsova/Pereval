@@ -1,4 +1,7 @@
-from marshmallow import Schema, fields, ValidationError
+import datetime
+import re
+
+from marshmallow import Schema, fields, ValidationError, validate
 
 
 class BytesField(fields.Field):
@@ -10,28 +13,43 @@ class BytesField(fields.Field):
             raise ValidationError('Invalid value')
 
 
-class DataSchema(Schema):
-    date_added = fields.DateTime(format='%Y-%m-%dT%H:%M:%S%z')
-    status = fields.String()
-    beautyTitle = fields.String()
-    pereval_title = fields.String()
-    other_titles = fields.String()
-    connect = fields.Boolean()
-    add_time = fields.DateTime(format='%Y-%m-%dT%H:%M:%S%z')
-    fam = fields.String()
-    name = fields.String()
-    otc = fields.String()
-    latitude = fields.Float()
-    longitude = fields.Float()
-    height = fields.Integer()
+def validate_email(email):
+    if not re.match(r'([a-zA-Z0-9_.+-]+)@[a-zA-Z0-9_.+-]+\.[a-zA-Z0-9_.+-]', email):
+        raise ValidationError('Невалидный адрес электронной почты')
+
+
+class UserSchema(Schema):
+    fam = fields.String(required=True)
+    name = fields.String(required=True)
+    otc = fields.String(required=True)
+    email = fields.Email(required=True, validate=validate_email)
+    phone = fields.String(required=True)
+
+
+class CoordsSchema(Schema):
+    latitude = fields.Float(required=True)
+    longitude = fields.Float(required=True)
+    height = fields.Integer(required=True)
+
+class LevelSchema(Schema):
     winter = fields.String()
     summer = fields.String()
     spring = fields.String()
     autumn = fields.String()
-    img_1_title = fields.String()
-    img_1 = BytesField()
-    img_2_title = fields.String()
-    img_2 = BytesField()
-    img_3_title = fields.String()
-    img_3 = BytesField()
 
+
+class ImageSchema(Schema):
+    title = fields.String()
+    data = BytesField(attribute='img')
+
+
+class DataSchema(Schema):
+    date_added = fields.DateTime(format='%Y-%m-%dT%H:%M:%S%z', required=True,
+                                 validate=validate.Range(max=datetime.datetime.utcnow()))
+    status = fields.String(required=True, validate=validate.OneOf(['new', 'pending', 'accepted', 'rejected']))
+    beautyTitle = fields.String()
+    pereval_title = fields.String(required=True, validate=validate.Length([1, 255]))
+    other_titles = fields.String()
+    connect = fields.String(default='', missing='')
+    add_time = fields.DateTime(format='%Y-%m-%dT%H:%M:%S%z', required=True,
+                               validate=validate.Range(max=datetime.datetime.utcnow()))

@@ -2,12 +2,14 @@ import datetime
 import json
 
 from flask import Flask, request, jsonify
+from marshmallow import ValidationError
 # from psycopg2 import IntegrityError
 # from psycopg2 import DataError
 from werkzeug.exceptions import BadRequest
 
 from dataclass import Pereval
 from sqlalchemy.exc import OperationalError, DataError, IntegrityError, InternalError
+from schemas import validate_email
 
 app = Flask(__name__)
 
@@ -51,6 +53,8 @@ def submitData():
         pereval.add_level(data['level']['winter'], data['level']['summer'],
                             data['level']['autumn'], data['level']['spring'])
 
+        validate_email(data['user']['email'])
+
         user_id = pereval.get_user_id(data['user']['email'])
         coords_id = pereval.get_coords_id(data['coords']['latitude'], data['coords']['longitude'],
                                             data['coords']['height'])
@@ -67,10 +71,12 @@ def submitData():
         response = {'status': 400, 'message': 'Пропущены обязательные поля', 'id': None}
     except InternalError:
         response = {'status': 400, 'message': 'Данное поле должно быть уникальным', 'id': None}
-    except TypeError:
-        response = {'status': 400, 'message': 'Неверно введённые данные', 'id': None}
-    except DataError:
-        response = {'status': 400, 'message': 'Неверно введённые данные', 'id': None}
+    # except TypeError:
+    #     response = {'status': 400, 'message': 'Неверно введённые данные', 'id': None}
+    # except ValidationError:
+    #     response = {'status': 400, 'message': 'Неверно введённые данные', 'id': None}
+    # except DataError:
+    #     response = {'status': 400, 'message': 'Неверно введённые данные', 'id': None}
     else:
         pereval_id = pereval.get_pereval_id(images_id)
         response = {'status': 200, 'message': None, 'id': pereval_id}
@@ -91,28 +97,29 @@ def changeData(id):
     if pereval.is_status_new(id):
         try:
             pereval_data = pereval.get_pereval_by_id(id)
-            coords_id = pereval.get_coords_id(pereval_data['latitude'], pereval_data['longitude'], pereval_data['height'])
-            if pereval_data['img_1_title']:
-                img_1_id = pereval.get_image(pereval_data['img_1_title']).id
+            coords_id = pereval.get_coords_id(pereval_data['coords']['latitude'],
+                                              pereval_data['coords']['longitude'], pereval_data['coords']['height'])
+            if pereval_data['images'][0]['title']:
+                img_1_id = pereval.get_image(pereval_data['images'][0]['title']).id
                 images_id = pereval.get_images_id(img_1_id)
             else:
                 img_1_id = None
                 images_id = None
 
-            if pereval_data['img_2_title']:
-                img_2_id = pereval.get_image(pereval_data['img_2_title']).id
+            if pereval_data['images'][1]['title']:
+                img_2_id = pereval.get_image(pereval_data['images'][1]['title']).id
             else:
                 img_2_id = None
-            if pereval_data['img_3_title']:
-                img_3_id = pereval.get_image(pereval_data['img_3_title']).id
+            if pereval_data['images'][2]['title']:
+                img_3_id = pereval.get_image(pereval_data['images'][2]['title']).id
             else:
                 img_3_id = None
 
 
-            if pereval_data['winter'] or pereval_data['summer'] or \
-                    pereval_data['autumn'] or pereval_data['spring']:
-                level_id = pereval.get_level_id(pereval_data['winter'], pereval_data['summer'],
-                                            pereval_data['autumn'], pereval_data['spring'])
+            if pereval_data['level']['winter'] or pereval_data['level']['summer'] or \
+                    pereval_data['level']['autumn'] or pereval_data['level']['spring']:
+                level_id = pereval.get_level_id(pereval_data['level']['winter'], pereval_data['level']['summer'],
+                                            pereval_data['level']['autumn'], pereval_data['level']['spring'])
             else:
                 level_id = None
 
@@ -166,8 +173,8 @@ def changeData(id):
             response = {'state': 0, 'message': 'Неверно введённые данные'}
         except IntegrityError:
             response = {'state': 0, 'message': 'Пропущены обязательные поля'}
-        except KeyError:
-            response = {'state': 0, 'message': 'Объект не существвует'}
+        # except KeyError:
+        #     response = {'state': 0, 'message': 'Объект не существвует'}
         except InternalError:
             response = {'state': 0, 'message': 'Данное поле должно быть уникальным'}
         except OperationalError:

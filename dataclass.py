@@ -4,7 +4,7 @@ import os
 from sqlalchemy import create_engine, text, select, and_
 from sqlalchemy.orm import Session, sessionmaker, aliased
 from sqlalchemy.schema import Table, MetaData
-from schemas import DataSchema
+from schemas import DataSchema, UserSchema, CoordsSchema, LevelSchema, ImageSchema, validate_email
 
 
 class Pereval:
@@ -22,47 +22,42 @@ class Pereval:
         self.pereval_images = Table('pereval_images', self.meta, schema='public', autoload_with=self.engine)
         self.spr_activities_types = Table('spr_activities_types', self.meta, schema='public', autoload_with=self.engine)
         self.users = Table('user', self.meta, schema='public', autoload_with=self.engine)
-        self.dataschema = DataSchema()
-
-    def get_joined_pereval_query(self):
-        img_1 = aliased(self.images)
-        img_2 = aliased(self.images)
-        img_3 = aliased(self.images)
-        return select(self.pereval_added.c.date_added, self.pereval_added.c.status, self.pereval_added.c.beautyTitle,
-                               self.pereval_added.c.title.label('pereval_title'), self.pereval_added.c.other_titles,
-                               self.pereval_added.c.connect, self.pereval_added.c.add_time,
-                      self.pereval_images.c.id.label('image_id'),
-                               self.users.c.fam, self.users.c.name, self.users.c.otc, self.users.c.email, self.users.c.phone,
-                               self.coords.c.latitude, self.coords.c.longitude, self.coords.c.height,
-                               self.levels.c.winter, self.levels.c.summer,
-                                self.levels.c.autumn, self.levels.c.spring,
-                               img_1.c.title.label('img_1_title'), img_1.c.img.label('img_1'),
-                               img_2.c.title.label('img_2_title'), img_2.c.img.label('img_2'),
-                               img_3.c.title.label('img_3_title'), img_3.c.img.label('img_3'))\
-            .join(self.users, self.users.c.id == self.pereval_added.c.user_id)\
-            .join(self.coords, self.coords.c.id == self.pereval_added.c.coords_id)\
-            .outerjoin(self.levels, self.levels.c.id == self.pereval_added.c.level_id)\
-            .outerjoin(self.pereval_images, self.pereval_images.c.id == self.pereval_added.c.images_id)\
-            .outerjoin(img_1, img_1.c.id == self.pereval_images.c.img_id_1)\
-            .outerjoin(img_2, img_2.c.id == self.pereval_images.c.img_id_2)\
-            .outerjoin(img_3, img_3.c.id == self.pereval_images.c.img_id_3)
 
     def get_pereval_by_id(self, id):
-        pereval_query = self.get_joined_pereval_query().where(self.pereval_added.c.id == id)
-        result = self.conn.execute(pereval_query).fetchone()
-        serialized_data = self.dataschema.dump(result)
-        serialized_data = {k: v.decode() if type(v) == bytes else v for k, v in serialized_data.items()}
+        pereval_query = select(self.pereval_added).where(self.pereval_added.c.id == id)
+        pereval_data = self.conn.execute(pereval_query).fetchone()
+        user_data = self.conn.execute(select(self.users).where(self.users.c.id == pereval_data.user_id)).fetchone()
+        coords_data = self.conn.execute(select(self.coords)
+                                        .where(self.coords.c.id == pereval_data.coords_id)).fetchone()
+        level_data = self.conn.execute(select(self.levels).where(self.levels.c.id == pereval_data.level_id)).fetchone()
+        pereval_images_data = self.conn.execute(select(self.pereval_images)
+                                                .where(self.pereval_images.c.id == pereval_data.images_id)).fetchone()
+        img_1 = self.conn.execute(select(self.images).where(self.images.c.id == pereval_images_data.img_id_1)).fetchone()
+        img_2 = self.conn.execute(select(self.images).where(self.images.c.id == pereval_images_data.img_id_2)).fetchone()
+        img_3 = self.conn.execute(select(self.images).where(self.images.c.id == pereval_images_data.img_id_3)).fetchone()
+        img_list = [img_1, img_2, img_3]
+        serialized_pereval_data = DataSchema().dump(pereval_data)
+        serialized_user_data = UserSchema().dump(user_data)
+        serialized_coords_data = CoordsSchema().dump(coords_data)
+        serialized_level_data = LevelSchema().dump(level_data)
+        serialized_images_data = []
+        for i in range(len(img_list)):
+            if img_list[i]:
+                serialized_images_data.append(ImageSchema().dump(img_list[i]))
+                serialized_images_data[i]['data'] = serialized_images_data[i]['data'].decode()
+        serialized_data = {**serialized_pereval_data, 'user': serialized_user_data,
+                           'coords': serialized_coords_data, 'level': serialized_level_data,
+                           'images': serialized_images_data}
         return serialized_data
 
     def get_users_perevals(self, email):
         user_id = self.get_user_id(email)
-        pereval_query = self.get_joined_pereval_query().where(self.pereval_added.c.user_id == user_id)
-        result = self.conn.execute(pereval_query).fetchall()
+        pereval_query = select(self.pereval_added).where(self.pereval_added.c.user_id == user_id)
+        pereval_data = self.conn.execute(pereval_query).fetchall()
         serialized_data = []
-        for i in range(len(result)):
-            serialized_data_one = self.dataschema.dump(result[i])
-            serialized_data_one = {k: v.decode() if type(v) == bytes else v for k, v in serialized_data_one.items()}
-            serialized_data.append(serialized_data_one)
+        for i in range(len(pereval_data)):
+            pereval_data_one = self.get_pereval_by_id(pereval_data[i].id)
+            serialized_data.append(pereval_data_one)
         return serialized_data
 
     def get_user_id(self, email):
@@ -76,6 +71,7 @@ class Pereval:
             return True
         else:
             return False
+
     def get_image(self, title):
         get_image_query = select(self.images).where(self.images.c.title == title)
         return self.conn.execute(get_image_query).fetchone()
@@ -95,10 +91,6 @@ class Pereval:
                                                            self.levels.c.summer == summer,
                                                            self.levels.c.autumn == autumn,
                                                            self.levels.c.spring == spring))
-        return self.conn.execute(get_id_query).fetchone()[0]
-
-    def get_img_id(self, title):
-        get_id_query = select(self.images.c.id).where(self.images.c.title == title)
         return self.conn.execute(get_id_query).fetchone()[0]
 
     def get_pereval_id(self, images_id):
@@ -186,12 +178,6 @@ class Pereval:
 
     def change_images(self, images_id, img_1_id, img_1_title, img_1_img, img_2_id=None, img_2_title=None, img_2_img=None,
                          img_3_id=None, img_3_title=None, img_3_img=None):
-        # img_id_1 = self.conn.execute(select(self.pereval_images.c.img_id_1)
-        #                              .where(self.pereval_images.c.id == images_id)).fetchone()[0]
-        # img_id_2 = self.conn.execute(
-        #     select(self.pereval_images.c.img_id_2).where(self.pereval_images.c.id == images_id)).fetchone()[0]
-        # img_id_3 = self.conn.execute(
-        #     select(self.pereval_images.c.img_id_3).where(self.pereval_images.c.id == images_id)).fetchone()[0]
         img_data = [{'id': img_1_id, 'title': img_1_title, 'img': img_1_img},
                     {'id': img_2_id, 'title': img_2_title, 'img': img_2_img},
                     {'id': img_3_id, 'title': img_3_title, 'img': img_3_img}]
@@ -200,7 +186,7 @@ class Pereval:
                 self.change_image(img_data[i]['id'], img_data[i]['title'], img_data[i]['img'])
             else:
                 self.add_image(img_data[i]['title'], img_data[i]['img'])
-                img_data[i]['id'] = self.get_img_id(img_data[i]['title'])
+                img_data[i]['id'] = self.get_image(img_data[i]['title']).id
         up_images_id_query = self.pereval_images.update().where(self.pereval_images.c.id == images_id).values(
             {'img_id_1': img_data[0]['id'], 'img_id_2': img_data[1]['id'], 'img_id_3': img_data[2]['id']}
         )
@@ -214,38 +200,9 @@ class Pereval:
         self.conn.execute(up_image_query)
         self.conn.commit()
 
-    # def delete_coords(self, coords_id):
-    #     del_coords_query = self.coords.delete().where(self.coords.c.id == coords_id)
-    #     self.conn.execute(del_coords_query)
-    #     self.conn.commit()
-    #
-    # def delete_level(self, level_id):
-    #     del_level_query = self.levels.delete().where(self.levels.c.id == level_id)
-    #     self.conn.execute(del_level_query)
-    #     self.conn.commit()
-    #
-    # def delete_image(self, img_id):
-    #     del_img_query = self.images.delete().where(self.images.c.id == img_id)
-    #     self.conn.execute(del_img_query)
-    #     self.conn.commit()
-    #
-    # def delete_pereval_images(self, images_id):
-    #     img_id_1 = self.conn.execute(select(self.pereval_images.c.img_id_1)
-    #                                  .where(self.pereval_images.c.id == images_id)).fetchone()[0]
-    #     img_id_2 = self.conn.execute(
-    #         select(self.pereval_images.c.img_id_2).where(self.pereval_images.c.id == images_id)).fetchone()[0]
-    #     img_id_3 = self.conn.execute(
-    #         select(self.pereval_images.c.img_id_3).where(self.pereval_images.c.id == images_id)).fetchone()[0]
-    #     img_id_list = [img_id_1, img_id_2, img_id_3]
-    #     for id in img_id_list:
-    #         self.delete_image(id)
-    #     del_pereval_images_query = self.pereval_images.delete().where(self.pereval_images.c.id == images_id)
-    #     self.conn.execute(del_pereval_images_query)
-    #     self.conn.commit()
-
 
 pereval = Pereval()
 # pereval.add_image('0img', bytes(10))
 # print(pereval.get_image('0img').title)
 # print(pereval.get_user_id('arina.poptsova@yamdex.ru'))
-print(pereval.get_pereval_by_id(41))
+print(pereval.get_pereval_by_id(39))
