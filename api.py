@@ -1,25 +1,27 @@
 import datetime
 import json
 
-from flask import Flask, request, jsonify
+from flask import Flask, request
 from marshmallow import ValidationError
-# from psycopg2 import IntegrityError
-# from psycopg2 import DataError
-from werkzeug.exceptions import BadRequest
+from faker import Faker
 
 from dataclass import Pereval
 from sqlalchemy.exc import OperationalError, DataError, IntegrityError, InternalError
-from schemas import validate_email
+from schemas import validate_email, validate_phone
 
 app = Flask(__name__)
 
 def add_and_get_image(pereval, data, i):
     try:
-        pereval.add_image(data['images'][i]['title'], (data['images'][i]['data']).encode('utf-8'))
+        if data['images'][i]['title'] in pereval.get_all_images_titles():
+            title = ''.join(faker.random_letters(25))
+        else:
+            title = data['images'][i]['title']
+        pereval.add_image(title, (data['images'][i]['data']).encode('utf-8'))
     except:
         img = None
     else:
-        img = pereval.get_image(data['images'][i]['title'])
+        img = pereval.get_image(title)
     return img
 
 def get_image(data, i):
@@ -29,16 +31,18 @@ def get_image(data, i):
         img = None
     return img
 
+faker = Faker()
+
 @app.route('/submitData/create/', methods=['POST'])
 def submitData():
     try:
         pereval = Pereval()
         data = request.get_json()
-        if not pereval.is_user_exist(data['user']['email']):
-            pereval.add_user(data['user']['email'], data['user']['fam'], data['user']['name'], data['user']['phone'],
-                            data['user']['otc'])
-        pereval.add_coords(data['coords']['latitude'], data['coords']['longitude'], data['coords']['height'])
-
+        validate_email(data['user']['email'])
+        validate_phone(data['user']['phone'])
+        email_list = [user.email for user in pereval.get_all_users().fetchall()]
+        if data['user']['email'] in email_list:
+            raise ValidationError('Такой пользователь уже существует')
         if data['images']:
             img_1 = add_and_get_image(pereval, data, 0)
             img_2 = add_and_get_image(pereval, data, 1)
@@ -50,10 +54,13 @@ def submitData():
             images_id = pereval.get_images_id(img_1.id if img_1 else None)
         else:
             images_id = None
+        if not pereval.is_user_exist(data['user']['email']):
+            pereval.add_user(data['user']['email'], data['user']['fam'], data['user']['name'], data['user']['phone'],
+                            data['user']['otc'])
+        pereval.add_coords(data['coords']['latitude'], data['coords']['longitude'], data['coords']['height'])
+
         pereval.add_level(data['level']['winter'], data['level']['summer'],
                             data['level']['autumn'], data['level']['spring'])
-
-        validate_email(data['user']['email'])
 
         user_id = pereval.get_user_id(data['user']['email'])
         coords_id = pereval.get_coords_id(data['coords']['latitude'], data['coords']['longitude'],
@@ -65,18 +72,19 @@ def submitData():
                             beautyTitle=data['beauty_title'], title=data['title'], other_titles=data['other_titles'],
                             connect=data['connect'], add_time=data['add_time'], images_id=images_id,
                             level_id=level_id)
+
     except OperationalError:
         response = {'status': 500, 'message': 'Ошибка подключения к БД', 'id': None}
+    except ValidationError:
+        response = {'status': 400, 'message': 'Неверно введённые данные', 'id': None}
     except IntegrityError:
         response = {'status': 400, 'message': 'Пропущены обязательные поля', 'id': None}
     except InternalError:
         response = {'status': 400, 'message': 'Данное поле должно быть уникальным', 'id': None}
-    # except TypeError:
-    #     response = {'status': 400, 'message': 'Неверно введённые данные', 'id': None}
-    # except ValidationError:
-    #     response = {'status': 400, 'message': 'Неверно введённые данные', 'id': None}
-    # except DataError:
-    #     response = {'status': 400, 'message': 'Неверно введённые данные', 'id': None}
+    except TypeError:
+        response = {'status': 400, 'message': 'Неверно введённые данные', 'id': None}
+    except DataError:
+        response = {'status': 400, 'message': 'Неверно введённые данные', 'id': None}
     else:
         pereval_id = pereval.get_pereval_id(images_id)
         response = {'status': 200, 'message': None, 'id': pereval_id}
@@ -99,28 +107,26 @@ def changeData(id):
             pereval_data = pereval.get_pereval_by_id(id)
             coords_id = pereval.get_coords_id(pereval_data['coords']['latitude'],
                                               pereval_data['coords']['longitude'], pereval_data['coords']['height'])
-            if pereval_data['images'][0]['title']:
+            try:
                 img_1_id = pereval.get_image(pereval_data['images'][0]['title']).id
                 images_id = pereval.get_images_id(img_1_id)
-            else:
+            except IndexError:
                 img_1_id = None
                 images_id = None
 
-            if pereval_data['images'][1]['title']:
+            try:
                 img_2_id = pereval.get_image(pereval_data['images'][1]['title']).id
-            else:
+            except IndexError:
                 img_2_id = None
-            if pereval_data['images'][2]['title']:
+            try:
                 img_3_id = pereval.get_image(pereval_data['images'][2]['title']).id
-            else:
+            except IndexError:
                 img_3_id = None
 
-
-            if pereval_data['level']['winter'] or pereval_data['level']['summer'] or \
-                    pereval_data['level']['autumn'] or pereval_data['level']['spring']:
+            try:
                 level_id = pereval.get_level_id(pereval_data['level']['winter'], pereval_data['level']['summer'],
                                             pereval_data['level']['autumn'], pereval_data['level']['spring'])
-            else:
+            except KeyError:
                 level_id = None
 
 

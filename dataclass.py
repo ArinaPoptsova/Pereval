@@ -1,8 +1,5 @@
-import datetime
-import json
 import os
 from sqlalchemy import create_engine, text, select, and_
-from sqlalchemy.orm import Session, sessionmaker, aliased
 from sqlalchemy.schema import Table, MetaData
 from schemas import DataSchema, UserSchema, CoordsSchema, LevelSchema, ImageSchema, validate_email
 
@@ -100,6 +97,22 @@ class Pereval:
     def get_date_added(self, id):
         get_date_query = select(self.pereval_added.c.date_added).where(self.pereval_added.c.id == id)
         return self.conn.execute(get_date_query).fetchone()[0]
+
+    def get_random_pereval(self):
+        get_all_query = select(self.pereval_added)
+        return self.conn.execute(get_all_query).fetchone()
+
+    def get_all_users(self):
+        get_all_query = select(self.users)
+        return self.conn.execute(get_all_query)
+
+    def get_first_user(self):
+        get_all_query = select(self.users)
+        return self.conn.execute(get_all_query).fetchone()
+
+    def get_all_images_titles(self):
+        get_all_query = select(self.images.c.title)
+        return [title[0] for title in self.conn.execute(get_all_query).fetchall()]
 
     def is_status_new(self, id):
         get_status_query = select(self.pereval_added.c.status).where(self.pereval_added.c.id == id)
@@ -199,10 +212,3 @@ class Pereval:
         )
         self.conn.execute(up_image_query)
         self.conn.commit()
-
-
-pereval = Pereval()
-# pereval.add_image('0img', bytes(10))
-# print(pereval.get_image('0img').title)
-# print(pereval.get_user_id('arina.poptsova@yamdex.ru'))
-print(pereval.get_pereval_by_id(39))
